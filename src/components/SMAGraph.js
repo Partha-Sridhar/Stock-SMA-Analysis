@@ -79,10 +79,18 @@ const TimeRangeSelector = styled.div`
   padding: 16px;
   backdrop-filter: blur(20px);
   z-index: 100;
-  min-width: 240px;
-  max-width: 280px;
+  min-width: 320px;
+  max-width: 380px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
   transform: translateY(0);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  
+  ${props => props.collapsed && `
+    padding: 8px 16px;
+    min-width: 180px;
+    max-width: 220px;
+  `}
 `;
 
 const TimeRangeTitle = styled.h4`
@@ -91,6 +99,35 @@ const TimeRangeTitle = styled.h4`
   font-size: 1rem;
   font-weight: 600;
   text-align: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+`;
+
+const CollapsibleContent = styled.div`
+  display: ${props => props.collapsed ? 'none' : 'block'};
+  transition: all 0.3s ease;
+`;
+
+const CollapseButton = styled.button`
+  background: none;
+  border: none;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 auto;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
 `;
 
 const TimeRangeInputs = styled.div`
@@ -271,7 +308,7 @@ const SMAButton = styled.button`
 
 const ScrollContainer = styled.div`
   position: relative;
-  overflow-x: auto;
+  overflow-x: ${props => props.disableScroll ? 'hidden' : 'auto'};
   overflow-y: visible;
   width: 100%;
   height: 500px;
@@ -308,7 +345,7 @@ const ScrollContainer = styled.div`
 `;
 
 const ChartWrapper = styled.div`
-  min-width: ${props => props.minWidth || '1200px'};
+  min-width: ${props => props.disableScroll ? '100%' : (props.minWidth || '1200px')};
   height: 100%;
 `;
 
@@ -378,6 +415,7 @@ const SMAGraph = ({ company, data, onBack }) => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [activeIndex, setActiveIndex] = useState(null);
+  const [isTimeRangeCollapsed, setIsTimeRangeCollapsed] = useState(false);
   const priceChartRef = useRef(null);
   const percentageChartRef = useRef(null);
 
@@ -395,10 +433,6 @@ const SMAGraph = ({ company, data, onBack }) => {
     if (!data) return [];
     
     return data
-      .filter(item => {
-        // Check if at least one selected SMA has data
-        return selectedSMAs.some(sma => item[`SMA_${sma}`] !== null);
-      })
       .map(item => {
         const result = {
           date: new Date(item.Date),
@@ -441,10 +475,23 @@ const SMAGraph = ({ company, data, onBack }) => {
       const start = new Date(startDate);
       const end = new Date(endDate);
       
-      return processedData.filter(item => {
+      const filtered = processedData.filter(item => {
         const itemDate = new Date(item.date);
         return itemDate >= start && itemDate <= end;
       });
+      
+      // Check if timespan is longer than 1 year
+      const timespanDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+      const isLongTimespan = timespanDays > 365;
+      
+      if (isLongTimespan) {
+        // For timespans longer than 1 year, sample data to condense into single view
+        const sampleSize = Math.min(200, filtered.length); // Max 200 data points
+        const step = Math.max(1, Math.floor(filtered.length / sampleSize));
+        return filtered.filter((_, index) => index % step === 0);
+      }
+      
+      return filtered;
     }
     
     return processedData;
@@ -456,13 +503,17 @@ const SMAGraph = ({ company, data, onBack }) => {
     
     const prices = filteredData.map(d => d.price);
     const smaValues = [];
-    selectedSMAs.forEach(sma => {
-      filteredData.forEach(d => {
-        if (d[`sma${sma}`] !== null) {
-          smaValues.push(d[`sma${sma}`]);
-        }
+    
+    // Only add SMA values if SMAs are selected
+    if (selectedSMAs.length > 0) {
+      selectedSMAs.forEach(sma => {
+        filteredData.forEach(d => {
+          if (d[`sma${sma}`] !== null) {
+            smaValues.push(d[`sma${sma}`]);
+          }
+        });
       });
-    });
+    }
     
     const allValues = [...prices, ...smaValues];
     const min = Math.min(...allValues);
@@ -478,7 +529,7 @@ const SMAGraph = ({ company, data, onBack }) => {
 
   // Calculate dynamic Y-axis scale for percentage chart
   const percentageScale = useMemo(() => {
-    if (!filteredData.length) return { min: -10, max: 10 };
+    if (!filteredData.length || selectedSMAs.length === 0) return { min: -10, max: 10 };
     
     const percentages = [];
     selectedSMAs.forEach(sma => {
@@ -584,6 +635,17 @@ const SMAGraph = ({ company, data, onBack }) => {
     return currentYear ? `${currentYear}` : 'Loading...';
   };
 
+  // Check if current timespan is longer than 1 year
+  const isLongTimespan = useMemo(() => {
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const timespanDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+      return timespanDays > 365;
+    }
+    return false;
+  }, [startDate, endDate]);
+
   // Custom tooltip for price chart with difference values
   const PriceTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -610,7 +672,7 @@ const SMAGraph = ({ company, data, onBack }) => {
           <div style={{ marginBottom: '8px', color: '#ffffff', fontSize: '1.1rem' }}>
             <strong>Price:</strong> ${data.price.toFixed(2)}
           </div>
-          {selectedSMAs.map(sma => {
+          {selectedSMAs.length > 0 ? selectedSMAs.map(sma => {
             const value = data[`sma${sma}`];
             const diff = data[`diff${sma}`];
             if (value !== null) {
@@ -630,7 +692,11 @@ const SMAGraph = ({ company, data, onBack }) => {
               );
             }
             return null;
-          })}
+          }) : (
+            <div style={{ color: '#cccccc', fontSize: '0.9rem', fontStyle: 'italic' }}>
+              No SMAs selected - showing price only
+            </div>
+          )}
         </div>
       );
     }
@@ -663,7 +729,7 @@ const SMAGraph = ({ company, data, onBack }) => {
           <div style={{ marginBottom: '8px', color: '#ffffff', fontSize: '1.1rem' }}>
             <strong>Price:</strong> ${data.price.toFixed(2)}
           </div>
-          {selectedSMAs.map(sma => {
+          {selectedSMAs.length > 0 ? selectedSMAs.map(sma => {
             const value = data[`sma${sma}`];
             const diff = data[`diff${sma}`];
             if (diff !== null) {
@@ -684,7 +750,11 @@ const SMAGraph = ({ company, data, onBack }) => {
               );
             }
             return null;
-          })}
+          }) : (
+            <div style={{ color: '#cccccc', fontSize: '0.9rem', fontStyle: 'italic' }}>
+              No SMAs selected - percentage chart not available
+            </div>
+          )}
         </div>
       );
     }
@@ -706,68 +776,103 @@ const SMAGraph = ({ company, data, onBack }) => {
       </Header>
 
       
-      <TimeRangeSelector>
-        <TimeRangeTitle>📅 Time Range</TimeRangeTitle>
+      <TimeRangeSelector 
+        collapsed={isTimeRangeCollapsed}
+        onClick={() => setIsTimeRangeCollapsed(!isTimeRangeCollapsed)}
+      >
+        <TimeRangeTitle>
+          <span>📅</span>
+          <span>Time Range</span>
+        </TimeRangeTitle>
         
-        <YearSelector>
-          <YearLabel>Select Year</YearLabel>
-          <YearSelect 
-            value={currentYear || ''} 
-            onChange={(e) => {
-              const year = e.target.value;
-              if (year) {
-                const yearStart = `${year}-01-01`;
-                const yearEnd = `${year}-12-31`;
-                handleDateRangeChange(yearStart, yearEnd);
-              }
-            }}
-          >
-            <option value="">Choose a year...</option>
-            {Array.from({ length: 25 }, (_, i) => {
-              const year = new Date().getFullYear() - i;
-              return (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              );
-            })}
-          </YearSelect>
-        </YearSelector>
+        <CollapsibleContent collapsed={isTimeRangeCollapsed}>
+          <YearSelector onClick={(e) => e.stopPropagation()}>
+            <YearLabel>Select Year</YearLabel>
+            <YearSelect 
+              value={currentYear || ''} 
+              onChange={(e) => {
+                e.stopPropagation();
+                const year = e.target.value;
+                if (year) {
+                  const yearStart = `${year}-01-01`;
+                  const yearEnd = `${year}-12-31`;
+                  handleDateRangeChange(yearStart, yearEnd);
+                }
+              }}
+            >
+              <option value="">Choose a year...</option>
+              {Array.from({ length: 25 }, (_, i) => {
+                const year = new Date().getFullYear() - i;
+                return (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                );
+              })}
+            </YearSelect>
+          </YearSelector>
 
-        <PresetButtons>
-          <PresetButton onClick={() => handlePresetRange('1year')}>1 Year</PresetButton>
-          <PresetButton onClick={() => handlePresetRange('2years')}>2 Years</PresetButton>
-          <PresetButton onClick={() => handlePresetRange('5years')}>5 Years</PresetButton>
-          <PresetButton onClick={() => handlePresetRange('all')}>All Data</PresetButton>
-        </PresetButtons>
+          <PresetButtons onClick={(e) => e.stopPropagation()}>
+            <PresetButton onClick={(e) => {
+              e.stopPropagation();
+              handlePresetRange('1year');
+            }}>1 Year</PresetButton>
+            <PresetButton onClick={(e) => {
+              e.stopPropagation();
+              handlePresetRange('2years');
+            }}>2 Years</PresetButton>
+            <PresetButton onClick={(e) => {
+              e.stopPropagation();
+              handlePresetRange('5years');
+            }}>5 Years</PresetButton>
+            <PresetButton onClick={(e) => {
+              e.stopPropagation();
+              handlePresetRange('all');
+            }}>All Data</PresetButton>
+          </PresetButtons>
 
-        <CustomRangeSection>
-          <CustomRangeTitle>Custom Range</CustomRangeTitle>
-          <DateInputs>
-            <DateInput
-              type="date"
-              value={startDate}
-              onChange={(e) => handleDateRangeChange(e.target.value, endDate)}
-              placeholder="Start Date"
-            />
-            <DateInput
-              type="date"
-              value={endDate}
-              onChange={(e) => handleDateRangeChange(startDate, e.target.value)}
-              placeholder="End Date"
-            />
-          </DateInputs>
-          <ApplyButton 
-            onClick={() => {
-              if (startDate && endDate) {
-                handleDateRangeChange(startDate, endDate);
-              }
-            }}
-            disabled={!startDate || !endDate}
-          >
-            Apply Custom Range
-          </ApplyButton>
-        </CustomRangeSection>
+          <CustomRangeSection onClick={(e) => e.stopPropagation()}>
+            <CustomRangeTitle>Custom Range</CustomRangeTitle>
+            <DateInputs>
+              <DateInput
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  handleDateRangeChange(e.target.value, endDate);
+                }}
+                placeholder="Start Date"
+              />
+              <DateInput
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  handleDateRangeChange(startDate, e.target.value);
+                }}
+                placeholder="End Date"
+              />
+            </DateInputs>
+            <ApplyButton 
+              onClick={(e) => {
+                e.stopPropagation();
+                if (startDate && endDate) {
+                  handleDateRangeChange(startDate, endDate);
+                }
+              }}
+              disabled={!startDate || !endDate}
+            >
+              Apply Custom Range
+            </ApplyButton>
+          </CustomRangeSection>
+        </CollapsibleContent>
+        
+        <CollapseButton onClick={(e) => {
+          e.stopPropagation();
+          setIsTimeRangeCollapsed(!isTimeRangeCollapsed);
+        }}>
+          {isTimeRangeCollapsed ? '▼ Expand' : '▲ Collapse'}
+        </CollapseButton>
       </TimeRangeSelector>
 
       <SMALegend>
@@ -811,11 +916,12 @@ const SMAGraph = ({ company, data, onBack }) => {
                   <ScrollContainer 
                     ref={priceChartRef}
                     onScroll={() => handleScroll(priceChartRef, percentageChartRef)}
+                    disableScroll={isLongTimespan}
                   >
-                    <ScrollIndicator>
-                      {filteredData.length} data points
-                    </ScrollIndicator>
-                    <ChartWrapper minWidth={`${Math.max(filteredData.length * 4, 1200)}px`}>
+                    <ChartWrapper 
+                      minWidth={`${Math.max(filteredData.length * 4, 1200)}px`}
+                      disableScroll={isLongTimespan}
+                    >
                       <ChartContainer>
                         <ResponsiveContainer width="100%" height="100%">
                           <ComposedChart 
@@ -868,30 +974,32 @@ const SMAGraph = ({ company, data, onBack }) => {
         </ChartWrapper>
       </ScrollContainer>
 
-      {/* Percentage Difference Chart */}
-      <div style={{ marginTop: '30px' }}>
-        <div style={{ 
-          color: '#ffffff', 
-          fontSize: '1.2rem', 
-          fontWeight: '700', 
-          marginBottom: '15px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          textShadow: '0 1px 2px rgba(0, 0, 0, 0.3)'
-        }}>
-          <TrendingUp size={24} color="#ff6b6b" />
-          Percentage Differences: (Price - SMA) / SMA × 100%
-        </div>
+      {/* Percentage Difference Chart - Only show when SMAs are selected */}
+      {selectedSMAs.length > 0 && (
+        <div style={{ marginTop: '30px' }}>
+          <div style={{ 
+            color: '#ffffff', 
+            fontSize: '1.2rem', 
+            fontWeight: '700', 
+            marginBottom: '15px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            textShadow: '0 1px 2px rgba(0, 0, 0, 0.3)'
+          }}>
+            <TrendingUp size={24} color="#ff6b6b" />
+            Percentage Differences: (Price - SMA) / SMA × 100%
+          </div>
         
                     <ScrollContainer 
                       ref={percentageChartRef}
                       onScroll={() => handleScroll(percentageChartRef, priceChartRef)}
+                      disableScroll={isLongTimespan}
                     >
-                      <ScrollIndicator>
-                        {filteredData.length} data points
-                      </ScrollIndicator>
-                      <ChartWrapper minWidth={`${Math.max(filteredData.length * 4, 1200)}px`}>
+                      <ChartWrapper 
+                        minWidth={`${Math.max(filteredData.length * 4, 1200)}px`}
+                        disableScroll={isLongTimespan}
+                      >
                         <ChartContainer>
                           <ResponsiveContainer width="100%" height="100%">
                             <ComposedChart 
@@ -943,7 +1051,8 @@ const SMAGraph = ({ company, data, onBack }) => {
             </ChartContainer>
           </ChartWrapper>
         </ScrollContainer>
-      </div>
+        </div>
+      )}
     </GraphContainer>
   );
 };
